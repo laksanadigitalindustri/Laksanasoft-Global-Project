@@ -1,0 +1,28 @@
+name: Debug and Compile via SSH
+
+on:
+  workflow_dispatch: # Memungkinkan Anda menjalankan action ini secara manual dari tab Actions di GitHub
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  build-and-debug:
+    runs-on: ubuntu-latest # Anda bisa menggantinya jika membutuhkan OS lain (misal: windows-latest atau macos-latest)
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Anda bisa menambahkan langkah setup dependensi atau environment untuk compile di sini
+      # Contoh:
+      # - name: Setup Node/Python/C++ dll
+      #   ...
+
+      - name: Setup tmate session for SSH debugging
+        uses: mxschmitt/action-tmate@v3
+        with:
+          # action-tmate akan menahan jalannya workflow dan memberikan Anda link SSH.
+          # Workflow akan berlanjut setelah Anda menutup koneksi SSH atau membuat file "continue"
+          limit-access-to-actor: true # Mengamankan sesi SSH hanya untuk akun GitHub Anda
