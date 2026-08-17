@@ -1,0 +1,106 @@
+#!/bin/bash
+set -e
+
+echo "🛠️ Setup Build Environment..."
+sudo apt-get update
+sudo apt-get install -y bc bison build-essential curl flex git gnupg gperf liblz4-tool libncurses5-dev libssl-dev lzop rsync zip python3 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+echo "📥 Clone Toolchain (Proton Clang)..."
+git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+
+echo "📥 Clone Official NetHunter Source (v0lk3n nethunter-lineage-23.2)..."
+git clone --recurse-submodules https://github.com/v0lk3n/nethunter_kernel_samsung_exynos9820.git -b nethunter-lineage-23.2 kernel
+
+echo "⚙️ Configure & Tune Defconfig (Exact beyond2lte Hardware Config)..."
+cd kernel
+export ARCH=arm64
+export CLANG_PATH="$(pwd)/../clang/bin"
+
+# Force unlock KEXEC, DEVTMPFS, TMPFS in Kconfig sources
+sed -i 's/bool "kexec system call" if EXPERT/bool "kexec system call"/' arch/arm64/Kconfig || true
+
+DEFCONFIG="exynos9820-beyond2lte_defconfig"
+if [ ! -f "arch/arm64/configs/$DEFCONFIG" ]; then
+  DEFCONFIG=$(ls arch/arm64/configs/ | grep beyond2lte | head -n 1)
+fi
+
+make O=out ARCH=arm64 CC=$CLANG_PATH/clang CROSS_COMPILE=$CLANG_PATH/aarch64-linux-gnu- CROSS_COMPILE_ARM32=$CLANG_PATH/arm-linux-gnueabi- $DEFCONFIG
+
+# Disable CFI to ensure 100% APatch KernelPatch Compatibility
+./scripts/config --file out/.config -d CFI_CLANG -d CFI_PERMISSIVE -d SHADOW_CALL_STACK
+
+# Built-in Vendor Drivers
+./scripts/config --file out/.config -e MALI_B_KBASE -e BCMDHD
+
+# NATIVE LINUX BOOTING & KEXEC REQUIREMENTS
+./scripts/config --file out/.config \
+  --enable DEVTMPFS --enable DEVTMPFS_MOUNT \
+  --enable TMPFS --enable TMPFS_POSIX_ACL --enable TMPFS_XATTR \
+  --enable KEXEC --enable KEXEC_CORE --enable KEXEC_FILE \
+  --enable BLK_DEV_INITRD --enable BLK_DEV_LOOP --enable BLK_DEV_RAM
+
+# USB ConfigFS Gadgets (HID BadUSB + USB Mass Storage Drive Mount)
+./scripts/config --file out/.config \
+  -e USB_CONFIGFS -e USB_CONFIGFS_F_HID -e USB_G_HID \
+  -e USB_CONFIGFS_F_FS -e USB_CONFIGFS_MASS_STORAGE -e USB_F_MASS_STORAGE
+
+# Bluetooth VHCI, HCI USB, UART, RFCOMM, BNEP & HIDP
+./scripts/config --file out/.config \
+  -e BT -e BT_RFCOMM -e BT_RFCOMM_TTY -e BT_BNEP -e BT_BNEP_MC_FILTER \
+  -e BT_BNEP_PROTO_FILTER -e BT_HIDP -e BT_HS -e BT_LE \
+  -e BT_HCIVHCI -e BT_HCIBTUSB -e BT_HCIUART -e BT_HCIUART_H4 \
+  -e BT_HCIUART_BCSP -e BT_HCIUART_ATH3K -e BT_HCIUART_LL -e BT_HCIUART_3WIRE
+
+# CAN-Bus Automotive Protocol Family
+./scripts/config --file out/.config \
+  -e CAN -e CAN_RAW -e CAN_BCM -e CAN_GW -e CAN_VCAN -e CAN_SLCAN \
+  -e CAN_DEV -e CAN_CALC_BITTIMING
+
+# Docker Engine Network Bridge, Veth, OverlayFS & Namespaces
+./scripts/config --file out/.config \
+  -e NAMESPACES -e UTS_NS -e IPC_NS -e USER_NS -e PID_NS -e NET_NS \
+  -e CGROUPS -e CGROUP_CPUACCT -e CGROUP_DEVICE -e CGROUP_FREEZER -e CGROUP_SCHED -e CPUSETS -e MEMCG \
+  -e BRIDGE -e VETH -e MACVLAN -e TAP -e TUN -e OVERLAY_FS \
+  -e NETFILTER_XT_MARK -e IP_NF_FILTER -e IP_NF_TARGET_MASQUERADE \
+  -e ATH9K_HTC -e RTL8187 -e RTL8812AU -e RTL88XXAU -e RTL88X2BU -e CFG80211 \
+  --set-str LOCALVERSION "-Laksanasoft-NH-v2.3-ExactDTB"
+
+make O=out ARCH=arm64 CC=$CLANG_PATH/clang CROSS_COMPILE=$CLANG_PATH/aarch64-linux-gnu- CROSS_COMPILE_ARM32=$CLANG_PATH/arm-linux-gnueabi- olddefconfig
+
+echo "🔨 Compile Exact beyond2lte DTB & Image.gz (~18MB Payload)..."
+make -j$(nproc --all) O=out ARCH=arm64 CC=$CLANG_PATH/clang CROSS_COMPILE=$CLANG_PATH/aarch64-linux-gnu- CROSS_COMPILE_ARM32=$CLANG_PATH/arm-linux-gnueabi- KCFLAGS="-Wno-error" Image.gz dtbs
+
+# Extract ONLY the single exact beyond2lte DTB to prevent multi-DTB table corruption
+EXYNOS_DTB=$(find out/arch/arm64/boot/dts/exynos/ -name "*beyond2lte*.dtb" | head -n 1)
+if [ -f "$EXYNOS_DTB" ]; then
+  echo "Found exact hardware DTB: $EXYNOS_DTB"
+  cp "$EXYNOS_DTB" out/arch/arm64/boot/dtb
+else
+  cat out/arch/arm64/boot/dts/exynos/*.dtb > out/arch/arm64/boot/dtb || true
+fi
+
+if [ -f "out/arch/arm64/boot/Image.gz" ] && [ -f "out/arch/arm64/boot/dtb" ]; then
+  cat out/arch/arm64/boot/Image.gz out/arch/arm64/boot/dtb > out/arch/arm64/boot/Image.gz-dtb
+fi
+
+echo "📦 Package Exact NetHunter Enterprise Kernel (Image.gz-dtb)..."
+cd ..
+git clone https://github.com/osm0sis/AnyKernel3.git
+if [ -f "kernel/out/arch/arm64/boot/Image.gz-dtb" ]; then
+  cp kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+elif [ -f "kernel/out/arch/arm64/boot/Image.gz" ]; then
+  cp kernel/out/arch/arm64/boot/Image.gz AnyKernel3/
+fi
+if [ -f "kernel/out/arch/arm64/boot/dtb" ]; then
+  cp kernel/out/arch/arm64/boot/dtb AnyKernel3/
+fi
+cd AnyKernel3
+sed -i 's/device.name1=maguro/device.name1=beyond2lte/' anykernel.sh
+sed -i 's/device.name2=toro/device.name2=beyond2/' anykernel.sh
+sed -i 's|BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;|if [ -b /dev/block/by-name/boot ]; then BLOCK=/dev/block/by-name/boot; elif [ -b /dev/block/sda14 ]; then BLOCK=/dev/block/sda14; else BLOCK=auto; fi;|' anykernel.sh
+sed -i 's/do.devicecheck=1/do.devicecheck=0/' anykernel.sh
+
+zip -r9 ../NetHunter-Kernel-Native-Linux-Kexec.zip *
+
+echo "✅ PROSES COMPILE DAN PACKAGING SELESAI!"
+echo "File hasil compile dapat ditemukan di: $(pwd)/../NetHunter-Kernel-Native-Linux-Kexec.zip"
