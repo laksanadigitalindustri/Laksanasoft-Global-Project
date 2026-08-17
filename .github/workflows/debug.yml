@@ -15,10 +15,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Anda bisa menambahkan langkah setup dependensi atau environment untuk compile di sini
-      # Contoh:
-      # - name: Setup Node/Python/C++ dll
-      #   ...
+      - name: Cek Spesifikasi Sistem (Debug)
+        run: |
+          echo "================ SPESIFIKASI CPU ================"
+          lscpu
+          echo "================ SPESIFIKASI RAM ================"
+          free -h
+          echo "================ SPESIFIKASI DISK ================"
+          df -h /
+          echo "================ SPESIFIKASI OS ================"
+          lsb_release -a
 
       - name: Setup tmate session for SSH debugging
         uses: mxschmitt/action-tmate@v3
