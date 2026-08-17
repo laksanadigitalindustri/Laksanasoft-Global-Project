@@ -25,4 +25,4 @@ jobs:
         with:
           # action-tmate akan menahan jalannya workflow dan memberikan Anda link SSH.
           # Workflow akan berlanjut setelah Anda menutup koneksi SSH atau membuat file "continue"
-          limit-access-to-actor: true # Mengamankan sesi SSH hanya untuk akun GitHub Anda
+          # limit-access-to-actor: true # Mengamankan sesi SSH hanya untuk akun GitHub Anda (dinonaktifkan karena Anda belum mendaftarkan public SSH key di GitHub)
