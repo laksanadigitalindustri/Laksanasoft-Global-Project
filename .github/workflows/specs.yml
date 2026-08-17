@@ -1,0 +1,19 @@
+name: Cek Spesifikasi Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check-specs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print Specs
+        run: |
+          echo "=== CPU ==="
+          lscpu
+          echo "=== RAM ==="
+          free -h
+          echo "=== DISK ==="
+          df -h /
+          echo "=== OS ==="
+          lsb_release -a
